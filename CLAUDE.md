@@ -1,8 +1,53 @@
-# open-notebook-desktop — Tauri v2 bootstrap brief
+# open-notebook-desktop — Tauri v2 build
 
-You are setting up a **native desktop wrapper** for [open-notebook](https://github.com/lfnovo/open-notebook) using **Tauri v2**, in this currently-empty directory. The target is a self-contained `.app` (macOS) and `.AppImage`/`.deb` (Linux) with **no Docker dependency**.
+A **native desktop wrapper** for [open-notebook](https://github.com/lfnovo/open-notebook) using **Tauri v2**. The target is a self-contained `.app` (macOS) and `.AppImage`/`.deb` (Linux) with **no Docker dependency**.
 
-Read this whole file before writing code. Several decisions hinge on spikes you must run first — do not skip them.
+> **Status: implemented and verified on macOS (aarch64).** This file is the design
+> brief plus the record of decisions actually made. The **Architectural decisions**
+> section immediately below is authoritative; the detailed sketch further down (config
+> snippets, scripts, `lib.rs`) is the original plan and is largely accurate, but where
+> it differs from `src-tauri/` and `scripts/`, **the files in the repo win** — the
+> as-built deltas are called out inline.
+
+---
+
+## Architectural decisions (as built)
+
+- **Variant: two-sidecar static-export.** The Next.js server is dropped; its static
+  export (`out/`) is served over Tauri's `tauri://` asset protocol and embedded in the
+  app binary. The two backing processes are SurrealDB and the Python API. (The
+  three-sidecar fallback was not needed — see spike outcomes.)
+- **Upstream pinned at `v1.9.0`** in `vendor/open-notebook` (frontend: Next.js 16 /
+  React 19; backend: FastAPI; DB: SurrealDB).
+- **Frontend → static export.** `scripts/export-frontend.sh` idempotently patches the
+  vendored frontend: `next.config.ts` → `output: 'export'` + `images.unoptimized` (drops
+  the `/api/*` rewrites proxy); removes the dynamic `app/config/route.ts`; splits the two
+  `'use client'` `[id]` pages into a server shell `page.tsx` (server-only
+  `generateStaticParams`, placeholder id) + the original `client.tsx`. Built with
+  `NEXT_PUBLIC_API_URL=http://localhost:5055`, baked into the bundle as the API base URL.
+- **API → python-build-standalone, NOT PyInstaller.** `scripts/freeze-api.sh` copies a
+  relocatable CPython 3.12 (from uv; symlinks dereferenced, `EXTERNALLY-MANAGED` marker
+  removed), installs the locked deps into its own site-packages (no venv → stays
+  relocatable), and copies the API source. Shipped via `bundle.resources`
+  (`{"resources/api":"api"}`), **not** as an `externalBin` sidecar.
+- **API process model.** `lib.rs` spawns `…/api/python/bin/python3.12 run_api.py`
+  (cwd = the source dir) with **`std::process`**, `API_RELOAD=false` so it is a single,
+  cleanly-killable uvicorn process, in its **own process group** (unix).
+- **SurrealDB → shell-plugin sidecar.** Vendored static binary **v2.1.4** (`externalBin`),
+  run against a persistent RocksDB store in `app_data_dir()` (`on.db`).
+- **Lifecycle.** Window opens on `loading.html` → spawn SurrealDB → wait `:8000` →
+  spawn API → wait `:5055` → navigate to `index.html` (client-redirects to `/notebooks`).
+- **Teardown.** Kill on **both `RunEvent::Exit` and `ExitRequested`** — macOS quit fires
+  `Exit`, not `ExitRequested`. SurrealDB via the sidecar's `kill()`; the API via
+  process-group `kill(-pid, SIGTERM→SIGKILL)` through the `libc` crate, so grandchildren
+  (ffmpeg, content extraction) die too. (Graceful quit leaves no orphans; a hard SIGKILL
+  of the app itself still can.)
+- **CORS.** `CORS_ORIGINS=tauri://localhost,http://tauri.localhost` passed to the API.
+- **Encryption key** persisted at `app_data_dir()/encryption.key` (generated once).
+- **App icons** generated from the upstream logo via `tauri icon` → `src-tauri/icons/`,
+  referenced in `bundle.icon`.
+- **Build target:** `app` bundle (via `npx @tauri-apps/cli@2 build --bundles app`);
+  `dmg` untested; Linux not yet built.
 
 ---
 
@@ -25,9 +70,21 @@ Open Notebook is MIT licensed, so bundling/redistribution is fine.
 
 ---
 
-## STOP — run these three spikes before building anything
+## Spike outcomes — all three passed ✅
 
-This variant is only viable if Open Notebook's frontend can be statically exported and can reach the API cross-origin. Clone and pin first, then validate:
+These were the make-or-break viability checks. **All passed**, which is why the
+two-sidecar variant above was chosen (no fallback needed). Kept here as rationale.
+
+- **Spike 1 (API base URL):** PASSED. `frontend/src/lib/config.ts` resolves the base URL
+  from `NEXT_PUBLIC_API_URL` at build time (after a now-removed `/config` fetch that fails
+  harmlessly). Set to `http://localhost:5055` at export time.
+- **Spike 2 (`output: 'export'`):** PASSED with the patches listed in the decisions
+  section. The `[id]` pages are client components reading `useParams()`, so they work as a
+  SPA; no core flow needs server rendering.
+- **Spike 3 (CORS):** PASSED. The API reads `CORS_ORIGINS`; it returns
+  `access-control-allow-origin: tauri://localhost` for the bundled origin.
+
+Original spike instructions (for reference / re-validation against a new upstream pin):
 
 ```bash
 git clone https://github.com/lfnovo/open-notebook vendor/open-notebook
@@ -92,6 +149,10 @@ Add `vendor/`, `out/`, and `src-tauri/binaries/` to `.gitignore`.
 
 ## `src-tauri/tauri.conf.json`
 
+> **As built (see the file):** `externalBin` lists only `binaries/surrealdb` (the API is
+> shipped under `bundle.resources` as `{"resources/api":"api"}`, not as a sidecar), and a
+> `bundle.icon` array was added. Otherwise as below.
+
 ```json
 {
   "$schema": "https://schema.tauri.app/config/2",
@@ -130,6 +191,10 @@ Add `vendor/`, `out/`, and `src-tauri/binaries/` to `.gitignore`.
 ---
 
 ## `src-tauri/capabilities/default.json`
+
+> **As built (see the file):** the `on-api` sidecar entry was removed (the API is no
+> longer a sidecar); only the `surrealdb` sidecar remains under `shell:allow-spawn`. The
+> permission identifiers below were accepted by codegen as-is.
 
 ```json
 {
@@ -194,6 +259,13 @@ fn main() {
 ```
 
 ## `src-tauri/src/lib.rs`
+
+> **As built (see the file), three changes from the sketch below:** (1) the API is spawned
+> with `std::process` from the bundled resources (`…/api/python/bin/python3.12 run_api.py`,
+> `API_RELOAD=false`, own process group) — not as a shell sidecar; SurrealDB stays a
+> sidecar. (2) Teardown matches **both `RunEvent::Exit` and `ExitRequested`** (macOS quit
+> fires `Exit`), and kills the API's process group via `libc`. (3) `CORS_ORIGINS` is set on
+> the API process.
 
 ```rust
 use std::{net::TcpStream, sync::Mutex, thread, time::Duration};
@@ -318,6 +390,12 @@ echo "placed surrealdb-${TRIPLE}"
 ```
 
 ### `scripts/freeze-api.sh`
+
+> **As built: this PyInstaller approach was NOT used.** The LangChain-heavy tree was too
+> fragile to freeze, so the script instead bundles a relocatable **python-build-standalone**
+> interpreter + deps + source as a Tauri resource (see the decisions section). The
+> PyInstaller sketch below is retained only as the rejected alternative.
+
 Freeze the FastAPI backend with PyInstaller. The entrypoint is `run_api.py` at the repo root.
 
 ```bash
@@ -395,6 +473,9 @@ cd src-tauri && cargo tauri build      # or: npm run tauri build
 ---
 
 ## Fallback: three-sidecar build
+
+> **Not used** — Spike 2 passed, so the static export is shipped directly. Retained as the
+> escape hatch if a future upstream pin makes core flows depend on server rendering.
 
 If Spike 2 fails (core flows need the Next server), keep `on-frontend` as a third sidecar: build the Next.js standalone server (`output: 'standalone'`), freeze/bundle it with Node, spawn it after the API, wait for `:8502`, and have `lib.rs` navigate the window to `http://localhost:8502` instead of `index.html`. Everything else (SurrealDB + API sidecars, lifecycle, kill-on-exit) is identical.
 

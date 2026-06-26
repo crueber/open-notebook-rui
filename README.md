@@ -82,7 +82,6 @@ the API's process group is terminated (SIGTERM → SIGKILL).
 
 ```
 .
-├── CLAUDE.md                  # original bootstrap brief / design rationale
 ├── README.md                  # this file
 ├── scripts/
 │   ├── _triple.sh             # host target-triple helper (rustc, uname fallback)
@@ -155,14 +154,14 @@ npx @tauri-apps/cli@2 build --bundles app
 **Database** — a vendored SurrealDB v2 static binary, run as a Tauri shell-plugin
 sidecar against a persistent RocksDB store in the app data dir.
 
-### Notable deviations from `CLAUDE.md`
+### Notable implementation choices
 
-| Brief said | What was actually needed |
+| Area | Choice & rationale |
 |---|---|
-| PyInstaller freeze for the API | python-build-standalone (more robust for the ML dep tree) |
-| Kill sidecars on `ExitRequested` | macOS quit fires `RunEvent::Exit`, **not** `ExitRequested`; handle both, and kill the API's process group via `libc` |
-| Shell permission ids "likely wrong" | `shell:allow-spawn` / `shell:allow-kill` were accepted as-is |
-| — | App icons must be generated (`tauri icon`) and referenced in `bundle.icon` |
+| API packaging | **python-build-standalone**, not PyInstaller — far more robust for the LangChain/ML dependency tree than freezing |
+| API process model | Shipped as a Tauri **resource** (not a single-file `externalBin` sidecar) and spawned with `std::process`; `API_RELOAD=false` keeps it to one cleanly-killable uvicorn process |
+| Shutdown event | macOS quit fires `RunEvent::Exit`, **not** `ExitRequested` — both are handled, and the API's process group is killed via `libc` so no sidecars are orphaned |
+| App icons | Generated from the upstream logo with `tauri icon` and referenced in `bundle.icon` |
 
 ### Known limitations / hardening TODO
 
