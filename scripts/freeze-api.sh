@@ -13,7 +13,7 @@ PY_VERSION="${PY_VERSION:-3.12}"   # repo requires >=3.11,<3.13
 
 export PATH="$HOME/.local/bin:$PATH"
 command -v uv >/dev/null || { echo "ERROR: uv not found on PATH"; exit 1; }
-[ -d "$REPO" ] || { echo "ERROR: $REPO not found. Clone vendor/open-notebook @ v1.9.0 first."; exit 1; }
+[ -d "$REPO" ] || { echo "ERROR: $REPO not found. Run 'make vendor' first (clones + pins open-notebook)."; exit 1; }
 
 echo "==> 1/4 obtain relocatable CPython $PY_VERSION (python-build-standalone via uv)"
 uv python install "$PY_VERSION"
@@ -43,6 +43,26 @@ cp -R api open_notebook prompts run_api.py "$STAGE/src/"
 for extra in commands migrations pyproject.toml; do
   [ -e "$REPO/$extra" ] && cp -R "$REPO/$extra" "$STAGE/src/"
 done
+
+# Disable the in-app update check. This is a desktop bundle: the API, frontend, and
+# DB ship together and are updated only by replacing the whole .app — an in-app
+# "update available" prompt (which links to GitHub) is misleading and is suppressed.
+# Append an override of get_latest_version_cached; Python's last module-level
+# definition wins, and api/routers/config.py:get_config resolves the name at call
+# time, so /api/config returns latestVersion=null, hasUpdate=false.
+CONFIG_PY="$STAGE/src/api/routers/config.py"
+if [ -f "$CONFIG_PY" ]; then
+  cat >> "$CONFIG_PY" <<'PY'
+
+
+# --- open-notebook-desktop patch: disable in-app update check ---
+async def get_latest_version_cached(current_version):  # noqa: F811
+    """Desktop builds are updated by replacing the bundle; never advertise updates."""
+    return None, False
+PY
+  echo "patched out the in-app update check in api/routers/config.py"
+fi
+
 # Trim bytecode caches to shrink the bundle.
 find "$STAGE" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 

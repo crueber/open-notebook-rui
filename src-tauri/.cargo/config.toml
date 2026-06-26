@@ -1,0 +1,3 @@
+# Place all build artifacts (including the Tauri bundle) in a top-level ./build dir.
+[build]
+target-dir = "../build"

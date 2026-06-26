@@ -10,7 +10,8 @@
 # Bundled Python API tree (~730 MB; rebuilt by scripts/freeze-api.sh)
 /src-tauri/resources/
 
-# Rust / Tauri build artifacts
+# Rust / Tauri build artifacts (target-dir relocated to top-level ./build)
+/build/
 /src-tauri/target/
 /src-tauri/gen/
 

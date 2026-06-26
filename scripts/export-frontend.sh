@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FE="$ROOT/vendor/open-notebook/frontend"
 APP="$FE/src/app/(dashboard)"
 
-[ -d "$FE" ] || { echo "ERROR: $FE not found. Clone vendor/open-notebook @ v1.9.0 first."; exit 1; }
+[ -d "$FE" ] || { echo "ERROR: $FE not found. Run 'make vendor' first (clones + pins open-notebook)."; exit 1; }
 
 echo "==> Patch 1/4: next.config.ts -> output:'export'"
 cat > "$FE/next.config.ts" <<'TS'
@@ -86,7 +86,11 @@ cd "$FE"
 # Spike 1: the frontend resolves its API base URL from NEXT_PUBLIC_API_URL at
 # build time (src/lib/config.ts), baked into the bundle.
 export NEXT_PUBLIC_API_URL="http://localhost:5055"
-[ -d node_modules ] || npm ci
+# Install deps if missing OR stale (e.g. after re-pinning to a newer upstream that
+# added dependencies). `npm ci` is a clean, lockfile-exact install.
+if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  npm ci
+fi
 npm run build          # emits ./out for a static export
 
 echo "==> Stage ./out and add loading splash"

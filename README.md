@@ -5,7 +5,7 @@ A self-contained native desktop build of [Open Notebook](https://github.com/lfno
 [Tauri v2](https://tauri.app). **No Docker, no terminal, no separate database to
 install** — everything runs inside one app.
 
-Pinned to Open Notebook **v1.9.0**. Open Notebook is MIT licensed, so bundling and
+Pinned to Open Notebook **v1.10.0**. Open Notebook is MIT licensed, so bundling and
 redistribution are permitted.
 
 ---
@@ -48,6 +48,13 @@ Everything is stored locally under:
 ⚠️ **Do not delete `encryption.key`** — losing it means losing access to your saved
 provider credentials. Back up this folder to preserve your data.
 
+### Updating
+
+Updates ship as new builds of this app — install a newer `Open Notebook.app` over
+the old one; your data in Application Support is preserved. The app does **not** show
+in-app "update available" prompts (the bundled backend, frontend, and database are
+versioned together as one unit).
+
 ### Quitting
 
 Quit normally (⌘Q or the menu) and the bundled database + API shut down cleanly. A
@@ -83,21 +90,24 @@ the API's process group is terminated (SIGTERM → SIGKILL).
 ```
 .
 ├── README.md                  # this file
+├── Makefile                   # build orchestration (make build / run / clean)
 ├── scripts/
 │   ├── _triple.sh             # host target-triple helper (rustc, uname fallback)
 │   ├── fetch-surreal.sh       # download SurrealDB v2 -> src-tauri/binaries/
-│   ├── freeze-api.sh          # bundle the Python API -> src-tauri/resources/api/
+│   ├── freeze-api.sh          # bundle the Python API (+ disable update check) -> src-tauri/resources/api/
 │   └── export-frontend.sh     # patch + statically export the frontend -> ./out
-└── src-tauri/
-    ├── Cargo.toml             # tauri, tauri-plugin-shell, libc (unix)
-    ├── tauri.conf.json        # externalBin (surreal) + resources (api) + icons
-    ├── capabilities/default.json
-    ├── icons/                 # generated from vendor logo
-    └── src/{main,lib}.rs      # process lifecycle
+├── src-tauri/
+│   ├── Cargo.toml             # tauri, tauri-plugin-shell, libc (unix)
+│   ├── tauri.conf.json        # externalBin (surreal) + resources (api) + icons
+│   ├── capabilities/default.json
+│   ├── .cargo/config.toml     # sends build artifacts to top-level build/
+│   ├── icons/                 # generated from vendor logo
+│   └── src/{main,lib}.rs      # process lifecycle
+└── build/                     # (gitignored) Rust/Tauri output incl. the .app bundle
 ```
 
-Gitignored (rebuilt by the scripts): `vendor/`, `out/`, `src-tauri/binaries/`,
-`src-tauri/resources/`, `src-tauri/target/`, `src-tauri/gen/`.
+Gitignored (rebuilt by `make`): `vendor/`, `out/`, `build/`, `src-tauri/binaries/`,
+`src-tauri/resources/`, `src-tauri/gen/`.
 
 ### Prerequisites
 
@@ -109,23 +119,33 @@ Gitignored (rebuilt by the scripts): `vendor/`, `out/`, `src-tauri/binaries/`,
 
 ### Build
 
+The whole pipeline is driven by the `Makefile`:
+
 ```bash
-# 1. Vendor and pin the upstream source
-git clone https://github.com/lfnovo/open-notebook vendor/open-notebook
-git -C vendor/open-notebook checkout v1.9.0
+make build
+# clones + pins upstream, assembles the three payloads, generates icons, and
+# bundles the app -> build/release/bundle/macos/Open Notebook.app  (~800 MB)
 
-# 2. Assemble the three payloads
-bash scripts/fetch-surreal.sh        # SurrealDB v2.1.4  -> src-tauri/binaries/
-bash scripts/freeze-api.sh           # Python API bundle -> src-tauri/resources/api/  (~730 MB)
-bash scripts/export-frontend.sh      # static frontend   -> ./out
-
-# 3. One-time: generate app icons
-npx @tauri-apps/cli@2 icon vendor/open-notebook/logo.png
-
-# 4. Build the app bundle
-npx @tauri-apps/cli@2 build --bundles app
-# -> src-tauri/target/release/bundle/macos/Open Notebook.app  (~820 MB)
+make run        # build (if needed) and launch
+make clean      # remove build outputs (keeps vendored source + compile cache)
 ```
+
+The wrapped upstream version is pinned by the `ON_VERSION` variable (default
+**`v1.10.0`**); override it with `make build ON_VERSION=v1.10.0`.
+
+Individual stages run in order and can be invoked on their own:
+
+```bash
+make vendor      # git clone + checkout $(ON_VERSION) into vendor/open-notebook
+make surreal     # SurrealDB v2.1.4 binary -> src-tauri/binaries/
+make api         # relocatable Python API  -> src-tauri/resources/api/   (~730 MB)
+make frontend    # static frontend export  -> ./out
+make icons       # app icon set (only if missing)
+make app         # compile + bundle the .app
+```
+
+All Rust/Tauri build artifacts (including the bundle) go to the top-level `build/`
+directory, set via `src-tauri/.cargo/config.toml`.
 
 ### How the three payloads are produced
 
@@ -162,6 +182,8 @@ sidecar against a persistent RocksDB store in the app data dir.
 | API process model | Shipped as a Tauri **resource** (not a single-file `externalBin` sidecar) and spawned with `std::process`; `API_RELOAD=false` keeps it to one cleanly-killable uvicorn process |
 | Shutdown event | macOS quit fires `RunEvent::Exit`, **not** `ExitRequested` — both are handled, and the API's process group is killed via `libc` so no sidecars are orphaned |
 | App icons | Generated from the upstream logo with `tauri icon` and referenced in `bundle.icon` |
+| In-app update check | **Disabled** — `freeze-api.sh` patches the bundled `api/routers/config.py` so `/api/config` reports no update. A desktop bundle is updated by replacing the whole app, so the upstream "update available" prompt (which just links to GitHub) is misleading |
+| Build output | All cargo/Tauri artifacts go to the top-level `build/` dir via `src-tauri/.cargo/config.toml` |
 
 ### Known limitations / hardening TODO
 

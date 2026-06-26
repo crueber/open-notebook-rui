@@ -17,8 +17,9 @@ A **native desktop wrapper** for [open-notebook](https://github.com/lfnovo/open-
   export (`out/`) is served over Tauri's `tauri://` asset protocol and embedded in the
   app binary. The two backing processes are SurrealDB and the Python API. (The
   three-sidecar fallback was not needed — see spike outcomes.)
-- **Upstream pinned at `v1.9.0`** in `vendor/open-notebook` (frontend: Next.js 16 /
-  React 19; backend: FastAPI; DB: SurrealDB).
+- **Upstream pinned at `v1.10.0`** in `vendor/open-notebook` (frontend: Next.js 16 /
+  React 19; backend: FastAPI; DB: SurrealDB). The pin is the `ON_VERSION` variable in
+  the `Makefile`.
 - **Frontend → static export.** `scripts/export-frontend.sh` idempotently patches the
   vendored frontend: `next.config.ts` → `output: 'export'` + `images.unoptimized` (drops
   the `/api/*` rewrites proxy); removes the dynamic `app/config/route.ts`; splits the two
@@ -46,6 +47,16 @@ A **native desktop wrapper** for [open-notebook](https://github.com/lfnovo/open-
 - **Encryption key** persisted at `app_data_dir()/encryption.key` (generated once).
 - **App icons** generated from the upstream logo via `tauri icon` → `src-tauri/icons/`,
   referenced in `bundle.icon`.
+- **In-app update check DISABLED.** `freeze-api.sh` appends an override to the bundled
+  `api/routers/config.py` so `get_latest_version_cached` returns `(None, False)` →
+  `/api/config` reports `latestVersion: null, hasUpdate: false`, suppressing the
+  frontend's update toast (`use-version-check.ts`). A desktop bundle versions its API +
+  frontend + DB together; it is updated by replacing the whole `.app`, so the upstream
+  prompt (which only links to GitHub) is misleading.
+- **Build orchestration via `Makefile`.** `make build` runs the whole pipeline
+  (vendor → surreal → api → frontend → icons → app); `make run`/`clean` also exist.
+- **Build output is top-level `build/`** (cargo target-dir set in
+  `src-tauri/.cargo/config.toml`), not `src-tauri/target/`.
 - **Build target:** `app` bundle (via `npx @tauri-apps/cli@2 build --bundles app`);
   `dmg` untested; Linux not yet built.
 
@@ -88,7 +99,7 @@ Original spike instructions (for reference / re-validation against a new upstrea
 
 ```bash
 git clone https://github.com/lfnovo/open-notebook vendor/open-notebook
-cd vendor/open-notebook && git checkout v1.9.0   # pin; latest release as of writing
+cd vendor/open-notebook && git checkout v1.10.0   # pin (Makefile ON_VERSION); `make vendor` does this
 ```
 
 **Spike 1 — How does the frontend address the API?**
@@ -453,11 +464,17 @@ echo "staged ./out"
 
 ## Build order
 
+> **As built:** use the `Makefile` — `make build` runs the whole pipeline below
+> (plus `make vendor` and `make icons`) and bundles to top-level `build/`.
+
 ```bash
-bash scripts/fetch-surreal.sh
-bash scripts/freeze-api.sh
-bash scripts/export-frontend.sh
-cd src-tauri && cargo tauri build      # or: npm run tauri build
+make build       # vendor -> surreal -> api -> frontend -> icons -> app
+# equivalently, the underlying stages:
+#   make vendor    (git clone + checkout $ON_VERSION)
+#   bash scripts/fetch-surreal.sh
+#   bash scripts/freeze-api.sh
+#   bash scripts/export-frontend.sh
+#   npx @tauri-apps/cli@2 build --bundles app
 ```
 
 ---
