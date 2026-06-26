@@ -1,0 +1,22 @@
+# Vendored upstream clone (pinned at v1.9.0; re-created by scripts)
+/vendor/
+
+# Next.js static export staged as Tauri frontendDist
+/out/
+
+# Sidecar binaries (fetched/frozen by scripts; large, platform-specific)
+/src-tauri/binaries/
+
+# Bundled Python API tree (~730 MB; rebuilt by scripts/freeze-api.sh)
+/src-tauri/resources/
+
+# Rust / Tauri build artifacts
+/src-tauri/target/
+/src-tauri/gen/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# Claude Code personal local overrides
+/.claude/settings.local.json

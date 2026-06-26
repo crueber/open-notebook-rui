@@ -1,0 +1,175 @@
+# Open Notebook — Desktop
+
+A self-contained native desktop build of [Open Notebook](https://github.com/lfnovo/open-notebook)
+(an open-source, privacy-focused alternative to Google's NotebookLM), packaged with
+[Tauri v2](https://tauri.app). **No Docker, no terminal, no separate database to
+install** — everything runs inside one app.
+
+Pinned to Open Notebook **v1.9.0**. Open Notebook is MIT licensed, so bundling and
+redistribution are permitted.
+
+---
+
+## For users
+
+### What it is
+
+Open Notebook is an AI research assistant: upload sources (PDFs, audio, video, web
+pages), generate notes and insights, chat with your documents, search semantically,
+and produce podcasts — using the AI provider of your choice, with your data staying
+on your machine.
+
+This desktop build wraps the whole stack (web UI + API + database) into a single
+**Open Notebook.app**. Launch it and everything starts automatically.
+
+### Install & run
+
+1. Build the app (see [For developers](#for-developers)) or obtain a prebuilt
+   `Open Notebook.app`.
+2. Move it to `/Applications` and open it.
+3. A splash screen shows while the backend starts (first launch takes a few extra
+   seconds to run database migrations), then the app loads.
+4. Open **Settings → API Keys** to add credentials for an AI provider before using
+   AI features.
+
+> macOS: because the app is not yet code-signed/notarized, the first launch may need
+> **right-click → Open** to get past Gatekeeper.
+
+### Where your data lives
+
+Everything is stored locally under:
+
+```
+~/Library/Application Support/ai.opennotebook.desktop/
+├── on.db/            # SurrealDB database (notebooks, sources, notes, embeddings)
+└── encryption.key    # encrypts your stored provider API keys
+```
+
+⚠️ **Do not delete `encryption.key`** — losing it means losing access to your saved
+provider credentials. Back up this folder to preserve your data.
+
+### Quitting
+
+Quit normally (⌘Q or the menu) and the bundled database + API shut down cleanly. A
+forced kill (e.g. Activity Force Quit) may leave background helpers running until the
+next reboot.
+
+---
+
+## For developers
+
+### Architecture (the "two-sidecar static-export" variant)
+
+Open Notebook normally runs three services. Here the Next.js server is dropped and
+its frontend is shipped as a static export served over Tauri's `tauri://` asset
+protocol, leaving two backing processes:
+
+```
+Tauri shell (Rust, system webview)
+├── frontendDist = Next.js static export (out/), embedded in the app binary
+├── sidecar:  surrealdb  (vendored static binary, externalBin)       → 127.0.0.1:8000
+└── resource: API        (relocatable Python + deps + source)         → 127.0.0.1:5055
+```
+
+**Launch sequence** (`src-tauri/src/lib.rs`): window opens on `loading.html` → spawn
+SurrealDB → wait for `:8000` → spawn the API → wait for `:5055` → navigate the window
+to `index.html`, which client-redirects to `/notebooks`.
+
+**Shutdown**: on `RunEvent::Exit`/`ExitRequested`, the SurrealDB sidecar is killed and
+the API's process group is terminated (SIGTERM → SIGKILL).
+
+### Repository layout
+
+```
+.
+├── CLAUDE.md                  # original bootstrap brief / design rationale
+├── README.md                  # this file
+├── scripts/
+│   ├── _triple.sh             # host target-triple helper (rustc, uname fallback)
+│   ├── fetch-surreal.sh       # download SurrealDB v2 -> src-tauri/binaries/
+│   ├── freeze-api.sh          # bundle the Python API -> src-tauri/resources/api/
+│   └── export-frontend.sh     # patch + statically export the frontend -> ./out
+└── src-tauri/
+    ├── Cargo.toml             # tauri, tauri-plugin-shell, libc (unix)
+    ├── tauri.conf.json        # externalBin (surreal) + resources (api) + icons
+    ├── capabilities/default.json
+    ├── icons/                 # generated from vendor logo
+    └── src/{main,lib}.rs      # process lifecycle
+```
+
+Gitignored (rebuilt by the scripts): `vendor/`, `out/`, `src-tauri/binaries/`,
+`src-tauri/resources/`, `src-tauri/target/`, `src-tauri/gen/`.
+
+### Prerequisites
+
+- Rust + cargo (stable)
+- Node 20+ (one-time frontend export)
+- [`uv`](https://docs.astral.sh/uv/) (provides the relocatable CPython 3.12)
+- Tauri CLI v2 — used here via `npx @tauri-apps/cli@2`
+- Internet access (downloads SurrealDB, CPython, and npm/uv dependencies)
+
+### Build
+
+```bash
+# 1. Vendor and pin the upstream source
+git clone https://github.com/lfnovo/open-notebook vendor/open-notebook
+git -C vendor/open-notebook checkout v1.9.0
+
+# 2. Assemble the three payloads
+bash scripts/fetch-surreal.sh        # SurrealDB v2.1.4  -> src-tauri/binaries/
+bash scripts/freeze-api.sh           # Python API bundle -> src-tauri/resources/api/  (~730 MB)
+bash scripts/export-frontend.sh      # static frontend   -> ./out
+
+# 3. One-time: generate app icons
+npx @tauri-apps/cli@2 icon vendor/open-notebook/logo.png
+
+# 4. Build the app bundle
+npx @tauri-apps/cli@2 build --bundles app
+# -> src-tauri/target/release/bundle/macos/Open Notebook.app  (~820 MB)
+```
+
+### How the three payloads are produced
+
+**Frontend (`export-frontend.sh`)** — applies these idempotent patches so
+`output: 'export'` works, then runs `next build`:
+- `next.config.ts` → `output: 'export'`, `images.unoptimized` (drops the `/api/*`
+  rewrites proxy — there is no Next server at runtime).
+- Removes the dynamic `src/app/config/route.ts` route handler.
+- Splits the two `'use client'` dynamic pages (`notebooks/[id]`, `sources/[id]`) into
+  a server shell `page.tsx` (holds the server-only `generateStaticParams`, emitting a
+  placeholder so Next produces the route's HTML template + JS chunk) plus the original
+  client code in `client.tsx`. The real id is read client-side via `useParams()`.
+- Builds with `NEXT_PUBLIC_API_URL=http://localhost:5055`, which the frontend's
+  `src/lib/config.ts` bakes into the bundle as the API base URL.
+
+**API (`freeze-api.sh`)** — uses **python-build-standalone** rather than PyInstaller
+(the LangChain-heavy tree is fragile to freeze):
+- Copies uv's relocatable CPython 3.12 into the bundle (dereferencing symlinks;
+  removing the `EXTERNALLY-MANAGED` marker so it is installable).
+- Installs the locked third-party deps into that interpreter's own site-packages
+  (no venv → stays relocatable).
+- Copies the API source (`run_api.py`, `api/`, `open_notebook/`, `prompts/`, …).
+- At runtime `lib.rs` spawns `…/api/python/bin/python3.12 run_api.py` (cwd = `src`)
+  with `API_RELOAD=false` so it is a single, cleanly-killable uvicorn process.
+
+**Database** — a vendored SurrealDB v2 static binary, run as a Tauri shell-plugin
+sidecar against a persistent RocksDB store in the app data dir.
+
+### Notable deviations from `CLAUDE.md`
+
+| Brief said | What was actually needed |
+|---|---|
+| PyInstaller freeze for the API | python-build-standalone (more robust for the ML dep tree) |
+| Kill sidecars on `ExitRequested` | macOS quit fires `RunEvent::Exit`, **not** `ExitRequested`; handle both, and kill the API's process group via `libc` |
+| Shell permission ids "likely wrong" | `shell:allow-spawn` / `shell:allow-kill` were accepted as-is |
+| — | App icons must be generated (`tauri icon`) and referenced in `bundle.icon` |
+
+### Known limitations / hardening TODO
+
+- Readiness uses a TCP port check; replace with `GET /health`.
+- A hard SIGKILL of the app (not a normal quit) can orphan the sidecars.
+- No code-signing / notarization (needed for friendly macOS distribution).
+- Client-side navigation to a real `/notebooks/<id>` builds and the SPA loads, but
+  should be confirmed with a manual click-through (the route chunk exists).
+- Only the `app` bundle target is exercised; `dmg` is untested.
+- Linux (`.AppImage`/`.deb`) follows the same scripts but has not been built here.
