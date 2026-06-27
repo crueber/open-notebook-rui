@@ -6,18 +6,23 @@ Native desktop build of [Open Notebook](https://github.com/lfnovo/open-notebook)
 
 Unzip and move **Open Notebook.app** to `/Applications`.
 
-## ⚠️ First launch (unsigned app)
+## ⚠️ First launch (ad-hoc signed, not notarized)
 
-This build is **not yet code-signed or notarized**, so macOS Gatekeeper will block it on first open. To run it:
-
-1. Try to open it once (it will be blocked).
-2. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**.
-
-Or, from Terminal, clear the quarantine flag:
+This build is ad-hoc signed but **not notarized** with an Apple Developer ID, so
+macOS Gatekeeper blocks it on first open. **The simplest fix** — clear the
+quarantine flag macOS adds to downloads, then open it:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Open Notebook.app"
+xattr -cr "/Applications/Open Notebook.app"     # adjust the path to where you put it
+open "/Applications/Open Notebook.app"
 ```
+
+Alternatively, double-click it, dismiss the warning, then go to **System Settings →
+Privacy & Security**, scroll down, and click **Open Anyway**.
+
+> If you see **"Open Notebook is damaged and can't be opened"**, that's the same
+> Gatekeeper block — the `xattr -cr` command above resolves it. The app is not
+> actually damaged.
 
 A splash screen appears while the backend starts (first launch takes a few extra seconds to run database migrations), then the app loads. Add AI provider credentials in **Settings → API Keys** before using AI features.
 

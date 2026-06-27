@@ -33,8 +33,17 @@ This desktop build wraps the whole stack (web UI + API + database) into a single
 4. Open **Settings → API Keys** to add credentials for an AI provider before using
    AI features.
 
-> macOS: because the app is not yet code-signed/notarized, the first launch may need
-> **right-click → Open** to get past Gatekeeper.
+> **macOS Gatekeeper:** the app is ad-hoc signed but not notarized, so a downloaded
+> copy is blocked on first open (you may see *"Open Notebook is damaged and can't be
+> opened"* — it isn't damaged, that's just the quarantine block). Clear the quarantine
+> flag, then open it:
+>
+> ```bash
+> xattr -cr "/Applications/Open Notebook.app"
+> ```
+>
+> Or double-click, dismiss the warning, and use **System Settings → Privacy & Security
+> → Open Anyway**.
 
 ### Where your data lives
 
@@ -202,6 +211,7 @@ sidecar against a persistent RocksDB store in the app data dir.
 | API process model | Shipped as a Tauri **resource** (not a single-file `externalBin` sidecar) and spawned with `std::process`; `API_RELOAD=false` keeps it to one cleanly-killable uvicorn process |
 | Shutdown event | macOS quit fires `RunEvent::Exit`, **not** `ExitRequested` — both are handled, and the API's process group is killed via `libc` so no sidecars are orphaned |
 | App icons | Generated from the upstream logo with `tauri icon` and referenced in `bundle.icon` |
+| Code signing | Ad-hoc (`bundle.macOS.signingIdentity: "-"`) so the bundle is *validly* signed and sealed. Without it Tauri leaves a broken signature → quarantined downloads show "damaged." Not notarized (no Developer ID) |
 | In-app update check | **Disabled** — `freeze-api.sh` patches the bundled `api/routers/config.py` so `/api/config` reports no update. A desktop bundle is updated by replacing the whole app, so the upstream "update available" prompt (which just links to GitHub) is misleading |
 | Build output | All cargo/Tauri artifacts go to the top-level `build/` dir via `src-tauri/.cargo/config.toml` |
 
@@ -209,7 +219,9 @@ sidecar against a persistent RocksDB store in the app data dir.
 
 - Readiness uses a TCP port check; replace with `GET /health`.
 - A hard SIGKILL of the app (not a normal quit) can orphan the sidecars.
-- No code-signing / notarization (needed for friendly macOS distribution).
+- Ad-hoc signed but **not notarized** — a downloaded copy needs its quarantine flag
+  cleared (`xattr -cr`) or "Open Anyway". A Developer ID + notarization would remove
+  that friction.
 - Client-side navigation to a real `/notebooks/<id>` builds and the SPA loads, but
   should be confirmed with a manual click-through (the route chunk exists).
 - Only the `app` bundle target is exercised; `dmg` is untested.

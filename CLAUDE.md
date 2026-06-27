@@ -47,6 +47,13 @@ A **native desktop wrapper** for [open-notebook](https://github.com/lfnovo/open-
 - **Encryption key** persisted at `app_data_dir()/encryption.key` (generated once).
 - **App icons** generated from the upstream logo via `tauri icon` → `src-tauri/icons/`,
   referenced in `bundle.icon`.
+- **Ad-hoc code signing** via `bundle.macOS.signingIdentity: "-"`. Without it Tauri
+  leaves only linker-signed executables and an unsealed bundle (`codesign --verify`
+  fails: "no resources but signature indicates they must be present"), which makes a
+  quarantined download show "**…is damaged and can't be opened**". Ad-hoc signing seals
+  the bundle (valid signature) → downloads get the normal "unverified developer" prompt
+  instead. Still NOT notarized (no Developer ID), so users clear quarantine
+  (`xattr -cr`) or use "Open Anyway".
 - **In-app update check DISABLED.** `freeze-api.sh` appends an override to the bundled
   `api/routers/config.py` so `get_latest_version_cached` returns `(None, False)` →
   `/api/config` reports `latestVersion: null, hasUpdate: false`, suppressing the

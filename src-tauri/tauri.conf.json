@@ -34,6 +34,9 @@
     ],
     "resources": {
       "resources/api": "api"
+    },
+    "macOS": {
+      "signingIdentity": "-"
     }
   }
 }
