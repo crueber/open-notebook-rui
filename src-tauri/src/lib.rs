@@ -121,6 +121,14 @@ pub fn run() {
                     .env("API_PORT", "5055")
                     // Single uvicorn process — no reload watcher child to orphan.
                     .env("API_RELOAD", "false")
+                    // Never write .pyc into the bundle: the app lives in a signed,
+                    // read-only-by-intent .app, and bytecode files inside it break the
+                    // code signature ("sealed resource is missing or invalid" / "damaged").
+                    .env("PYTHONDONTWRITEBYTECODE", "1")
+                    // Keep runtime data (LangGraph SQLite checkpoints, uploads, tiktoken
+                    // cache) OUT of the bundle — upstream defaults to ./data relative to
+                    // cwd, which is inside the .app. Redirect to the writable data dir.
+                    .env("OPEN_NOTEBOOK_DATA_DIR", data_dir.join("data"))
                     .env("SURREAL_URL", "ws://127.0.0.1:8000/rpc")
                     .env("SURREAL_USER", "root")
                     .env("SURREAL_PASSWORD", "root")

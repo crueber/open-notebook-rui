@@ -64,6 +64,20 @@ PY
   echo "patched out the in-app update check in api/routers/config.py"
 fi
 
+# Redirect runtime data out of the (signed, read-only) bundle. Upstream hardcodes
+# DATA_FOLDER = "./data" relative to the cwd, which lib.rs sets to the bundled source
+# dir — so the LangGraph SQLite checkpoint DB, uploads, and tiktoken cache would be
+# written INSIDE the .app. That breaks the code signature ("sealed resource … invalid"
+# / "damaged") and fails outright when installed read-only in /Applications. Make
+# DATA_FOLDER env-overridable; lib.rs points OPEN_NOTEBOOK_DATA_DIR at the app data dir.
+APP_CONFIG="$STAGE/src/open_notebook/config.py"
+if [ -f "$APP_CONFIG" ]; then
+  perl -0pi -e 's/^DATA_FOLDER = "\.\/data"$/DATA_FOLDER = os.environ.get("OPEN_NOTEBOOK_DATA_DIR", ".\/data")/m' "$APP_CONFIG"
+  grep -q 'os.environ.get("OPEN_NOTEBOOK_DATA_DIR"' "$APP_CONFIG" || {
+    echo "ERROR: failed to patch DATA_FOLDER in open_notebook/config.py (upstream format changed)"; exit 1; }
+  echo "patched DATA_FOLDER to honor OPEN_NOTEBOOK_DATA_DIR in open_notebook/config.py"
+fi
+
 # Trim bytecode caches to shrink the bundle.
 find "$STAGE" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
