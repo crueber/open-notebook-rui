@@ -5,8 +5,9 @@ A self-contained native desktop build of [Open Notebook](https://github.com/lfno
 [Tauri v2](https://tauri.app). **No Docker, no terminal, no separate database to
 install** — everything runs inside one app.
 
-Pinned to Open Notebook **v1.10.0**. Open Notebook is MIT licensed, so bundling and
-redistribution are permitted.
+Each release is pinned to a specific release of Open Notebook (the current build
+wraps **v1.10.0**). Open Notebook is MIT licensed, so bundling and redistribution
+are permitted.
 
 ---
 
