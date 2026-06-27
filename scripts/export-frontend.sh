@@ -39,8 +39,16 @@ split_dynamic_route () {
   local dir="$1" name="$2"
   if [ ! -f "$dir/client.tsx" ]; then
     mv "$dir/page.tsx" "$dir/client.tsx"
-    # Rename whatever the original default export was to the client name.
+    # Rename whatever the original default export was to the client name. This
+    # assumes the upstream form `export default function <Name>(`; if a future
+    # pin changes it (anonymous/arrow default), fail loudly instead of emitting a
+    # page.tsx whose `import <name> from './client'` resolves to nothing.
     perl -0pi -e "s/export default function \w+\(/export default function ${name}(/" "$dir/client.tsx"
+    grep -q "export default function ${name}(" "$dir/client.tsx" || {
+      echo "ERROR: could not rename the default export in $dir/client.tsx to ${name}."
+      echo "       Upstream may have changed the page's export form; update split_dynamic_route."
+      exit 1
+    }
   fi
 }
 

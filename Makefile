@@ -51,6 +51,11 @@ vendor:
 	fi
 	@echo "==> checking out $(ON_VERSION)"
 	@git -C "$(VENDOR)" fetch --tags --quiet
+	@# Discard the in-place frontend patches from a prior build so checking out a
+	@# different ON_VERSION can't be blocked by a dirty tree (patches are reapplied
+	@# idempotently by scripts/export-frontend.sh).
+	@git -C "$(VENDOR)" reset --hard --quiet
+	@git -C "$(VENDOR)" clean -fdq
 	@git -C "$(VENDOR)" checkout --quiet "$(ON_VERSION)"
 	@echo "    vendor @ $$(git -C "$(VENDOR)" describe --tags)"
 
@@ -106,7 +111,7 @@ release: package
 	  $(GH) release upload $(ON_VERSION) "$(ZIP)" --repo $(GH_REPO) --clobber; \
 	else \
 	  echo "==> creating release $(ON_VERSION)"; \
-	  $(GH) release create $(ON_VERSION) "$(ZIP)" --repo $(GH_REPO) --target master \
+	  $(GH) release create $(ON_VERSION) "$(ZIP)" --repo $(GH_REPO) --target "$$(git rev-parse --abbrev-ref HEAD)" \
 	    --title "Open Notebook Desktop — $(ON_VERSION) (macOS, Apple Silicon)" \
 	    --notes-file build/release-notes.md; \
 	fi

@@ -475,20 +475,51 @@ echo "staged ./out"
 
 ---
 
-## Build order
+## Building & releasing (operator quick-reference)
 
-> **As built:** use the `Makefile` — `make build` runs the whole pipeline below
-> (plus `make vendor` and `make icons`) and bundles to top-level `build/`.
+Everything is driven by the `Makefile`. **To build and release, this is all you need:**
 
 ```bash
-make build       # vendor -> surreal -> api -> frontend -> icons -> app
-# equivalently, the underlying stages:
-#   make vendor    (git clone + checkout $ON_VERSION)
-#   bash scripts/fetch-surreal.sh
-#   bash scripts/freeze-api.sh
-#   bash scripts/export-frontend.sh
-#   npx @tauri-apps/cli@2 build --bundles app
+make build      # full pipeline -> build/release/bundle/macos/Open Notebook.app (~800 MB)
+make run        # build if needed, then launch the app
+make release    # build + zip + publish a GitHub release for $(ON_VERSION)
 ```
+
+`make build` runs, in order: `vendor` (git clone + reset/clean + checkout `$ON_VERSION`)
+→ `surreal` (fetch the SurrealDB binary) → `api` (`freeze-api.sh`) → `frontend`
+(`export-frontend.sh`) → `icons` (once) → `app` (`tauri build --bundles app`). Each is
+also a standalone target (`make api`, `make frontend`, …). Output goes to top-level
+`build/` (set by `src-tauri/.cargo/config.toml`).
+
+**Bumping the wrapped Open Notebook version** — change `ON_VERSION` (default in the
+`Makefile`); the vendor target resets the patched tree so re-pinning Just Works:
+
+```bash
+make build ON_VERSION=v1.11.0       # or: make release ON_VERSION=v1.11.0
+```
+
+After bumping, re-confirm the export patches still apply to the new upstream (the two
+`'use client'` `[id]` pages, `config/route.ts`, `next.config.ts`) — `export-frontend.sh`
+fails loudly if the page-export rename no longer matches.
+
+**`make release` specifics:**
+- Idempotent: creates the release if the tag (`$ON_VERSION`) is new, else refreshes its
+  notes and re-uploads the asset (`--clobber`). Targets repo `crueber/open-notebook-rui`.
+- Notes come from `packaging/release-notes.md` (placeholders filled at publish time).
+- Needs `gh` authenticated. **If a stale `GH_TOKEN` shadows the keyring login**
+  (symptom: `gh` 401 / "Bad credentials"), override the CLI:
+
+  ```bash
+  make release GH='env -u GH_TOKEN gh'
+  ```
+
+**Verifying a release works** (catches the "app is damaged" class of bug): download the
+published asset, unzip, and check the signature survived — `codesign --verify --deep
+--strict "Open Notebook.app"` must say *valid on disk*. Then `xattr -cr` it and launch.
+
+**Prerequisites:** Rust+cargo, Node 20+, `uv`, `npx @tauri-apps/cli@2`, and `gh` (for
+releases). The app is ad-hoc signed (`signingIdentity: "-"`) but **not notarized**, so
+downloaders clear quarantine (`xattr -cr`) or use "Open Anyway".
 
 ---
 

@@ -27,7 +27,8 @@ mkdir -p "$STAGE/python"
 cp -RL "$PYROOT"/. "$STAGE/python/"
 # Drop uv's managed/externally-managed markers so we can install into our copy.
 find "$STAGE/python" -name 'EXTERNALLY-MANAGED' -delete 2>/dev/null || true
-PYTHON="$STAGE/python/bin/python3.12"
+# Track PY_VERSION rather than hardcoding the minor (lib.rs spawns the generic python3).
+PYTHON="$STAGE/python/bin/python$PY_VERSION"
 "$PYTHON" --version
 
 echo "==> 3/4 install third-party deps into the bundled interpreter (not the project)"

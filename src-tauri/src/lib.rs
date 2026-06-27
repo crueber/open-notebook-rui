@@ -12,6 +12,19 @@ struct Procs {
     api: Mutex<Option<std::process::Child>>,
 }
 
+/// Replace the splash contents with a diagnosable error so a failed startup
+/// doesn't hang forever on a blank "Starting…" screen.
+fn show_startup_error(handle: &tauri::AppHandle, msg: &str) {
+    eprintln!("startup error: {msg}");
+    if let Some(win) = handle.get_webview_window("main") {
+        // JSON-encode to safely embed the message in the injected script.
+        let js = serde_json::to_string(msg)
+            .map(|m| format!("document.body.innerText = 'Open Notebook failed to start:\\n\\n' + {m};"))
+            .unwrap_or_else(|_| "void 0;".into());
+        let _ = win.eval(&js);
+    }
+}
+
 /// Poll a localhost port until it accepts a TCP connection (or we give up).
 fn wait_for_port(port: u16, tries: u32) -> bool {
     for _ in 0..tries {
@@ -81,20 +94,25 @@ pub fn run() {
                     Ok((_rx, child)) => {
                         *handle.state::<Procs>().surreal.lock().unwrap() = Some(child);
                     }
-                    Err(e) => { eprintln!("surreal spawn failed: {e}"); return; }
+                    Err(e) => { show_startup_error(&handle, &format!("could not start the database: {e}")); return; }
                 }
-                if !wait_for_port(8000, 60) { eprintln!("surreal never came up"); return; }
+                if !wait_for_port(8000, 60) {
+                    show_startup_error(&handle, "the database did not become reachable on 127.0.0.1:8000 (is another instance already using that port?)");
+                    return;
+                }
 
                 // 2) Python API. The encryption key must persist across launches —
                 //    it encrypts stored provider credentials. Generate once, reuse.
                 let key_path = data_dir.join("encryption.key");
                 let enc_key = std::fs::read_to_string(&key_path).unwrap_or_else(|_| {
-                    let k = uuid_like();
+                    let k = random_key();
                     std::fs::write(&key_path, &k).ok();
                     k
                 });
 
-                let python = api_dir.join("python/bin/python3.12");
+                // Use the generic python3 (a copy of python3.<minor>) so the bundled
+                // interpreter's minor version isn't pinned here. See freeze-api.sh.
+                let python = api_dir.join("python/bin/python3");
                 let src = api_dir.join("src");
                 let mut cmd = std::process::Command::new(&python);
                 cmd.arg("run_api.py")
@@ -123,9 +141,12 @@ pub fn run() {
                     Ok(child) => {
                         *handle.state::<Procs>().api.lock().unwrap() = Some(child);
                     }
-                    Err(e) => { eprintln!("api spawn failed ({}): {e}", python.display()); return; }
+                    Err(e) => { show_startup_error(&handle, &format!("could not start the API ({}): {e}", python.display())); return; }
                 }
-                if !wait_for_port(5055, 120) { eprintln!("api never came up"); return; }
+                if !wait_for_port(5055, 120) {
+                    show_startup_error(&handle, "the API did not become reachable on 127.0.0.1:5055 (check Console logs; another process may be using that port)");
+                    return;
+                }
                 // TODO(hardening): replace the TCP check above with an HTTP GET
                 // to http://127.0.0.1:5055/health for true readiness.
 
@@ -157,10 +178,10 @@ pub fn run() {
         });
 }
 
-/// Cheap random key generator to avoid pulling in the `uuid` crate.
-/// Replace with a real CSPRNG if you care.
-fn uuid_like() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    format!("on-{n:x}")
+/// Generate a 256-bit key as hex, from the OS CSPRNG. This key encrypts stored
+/// provider credentials, so it must not be predictable (a timestamp would be).
+fn random_key() -> String {
+    let mut buf = [0u8; 32];
+    getrandom::getrandom(&mut buf).expect("OS CSPRNG unavailable");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
 }
