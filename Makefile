@@ -13,16 +13,31 @@ SHELL := /usr/bin/env bash
 ON_VERSION ?= v1.10.0
 ON_REPO    ?= https://github.com/lfnovo/open-notebook
 
+# Pinned SurrealDB sidecar version (consumed by scripts/fetch-surreal.sh).
+SURREAL_VERSION ?= v2.1.4
+export SURREAL_VERSION
+
 # Tooling installed outside the default PATH (rustup, uv).
 export PATH := $(HOME)/.cargo/bin:$(HOME)/.local/bin:$(PATH)
 TAURI := npx --yes @tauri-apps/cli@2
+# GitHub CLI. Override if a stale GH_TOKEN shadows your login, e.g.:
+#   make release GH='env -u GH_TOKEN gh'
+GH ?= gh
 
 ROOT       := $(CURDIR)
 VENDOR     := $(ROOT)/vendor/open-notebook
 APP        := build/release/bundle/macos/Open Notebook.app
 
+# Release artifact naming. ON_VER strips the leading "v" (v1.10.0 -> 1.10.0).
+GH_REPO := crueber/open-notebook-rui
+ON_VER  := $(ON_VERSION:v%=%)
+ARCH    := $(shell uname -m)
+DIST    := build/dist
+ZIPNAME := OpenNotebook-Desktop-$(ON_VER)-macos-$(ARCH).zip
+ZIP     := $(DIST)/$(ZIPNAME)
+
 .DEFAULT_GOAL := build
-.PHONY: build run app vendor surreal api frontend icons clean clean-vendor distclean help
+.PHONY: build run app vendor surreal api frontend icons package release clean clean-vendor distclean help
 
 ## Full build: vendor + all three payloads + icons + app bundle.
 build: vendor surreal api frontend icons app
@@ -68,10 +83,39 @@ app:
 run: app
 	open "$(APP)"
 
+## Build, then zip the .app into a downloadable archive (build/dist/).
+package: build
+	@mkdir -p "$(DIST)"
+	@rm -f "$(ZIP)"
+	ditto -c -k --keepParent "$(APP)" "$(ZIP)"
+	@echo "✔ packaged $(ZIP) ($$(du -h "$(ZIP)" | cut -f1 | tr -d ' '))"
+
+## Build + package + publish a GitHub release for $(ON_VERSION). Idempotent: creates
+## the release if missing, otherwise refreshes its notes and re-uploads the asset.
+## Requires `gh` auth. See the GH variable above if a stale GH_TOKEN gets in the way.
+release: package
+	@mkdir -p build
+	@sed -e 's/@ON_VERSION@/$(ON_VERSION)/g' \
+	     -e 's/@SURREAL_VERSION@/$(SURREAL_VERSION)/g' \
+	     -e 's/@ARCH@/$(ARCH)/g' \
+	     -e 's/@ZIPNAME@/$(ZIPNAME)/g' \
+	     packaging/release-notes.md > build/release-notes.md
+	@if $(GH) release view $(ON_VERSION) --repo $(GH_REPO) >/dev/null 2>&1; then \
+	  echo "==> release $(ON_VERSION) exists — refreshing notes + asset"; \
+	  $(GH) release edit $(ON_VERSION) --repo $(GH_REPO) --notes-file build/release-notes.md; \
+	  $(GH) release upload $(ON_VERSION) "$(ZIP)" --repo $(GH_REPO) --clobber; \
+	else \
+	  echo "==> creating release $(ON_VERSION)"; \
+	  $(GH) release create $(ON_VERSION) "$(ZIP)" --repo $(GH_REPO) --target master \
+	    --title "Open Notebook Desktop — $(ON_VERSION) (macOS, Apple Silicon)" \
+	    --notes-file build/release-notes.md; \
+	fi
+	@echo "✔ released $(ON_VERSION): https://github.com/$(GH_REPO)/releases/tag/$(ON_VERSION)"
+
 ## Remove build outputs but keep the vendored source and compile caches.
 clean:
 	rm -rf out src-tauri/binaries src-tauri/resources
-	rm -rf "build/release/bundle"
+	rm -rf "build/release/bundle" build/dist build/release-notes.md
 
 ## Also remove the cargo target cache.
 distclean: clean

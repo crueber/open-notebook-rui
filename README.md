@@ -90,7 +90,9 @@ the API's process group is terminated (SIGTERM → SIGKILL).
 ```
 .
 ├── README.md                  # this file
-├── Makefile                   # build orchestration (make build / run / clean)
+├── Makefile                   # build + release orchestration (make build / run / package / release)
+├── packaging/
+│   └── release-notes.md       # GitHub release notes template (placeholders filled at publish)
 ├── scripts/
 │   ├── _triple.sh             # host target-triple helper (rustc, uname fallback)
 │   ├── fetch-surreal.sh       # download SurrealDB v2 -> src-tauri/binaries/
@@ -116,6 +118,7 @@ Gitignored (rebuilt by `make`): `vendor/`, `out/`, `build/`, `src-tauri/binaries
 - [`uv`](https://docs.astral.sh/uv/) (provides the relocatable CPython 3.12)
 - Tauri CLI v2 — used here via `npx @tauri-apps/cli@2`
 - Internet access (downloads SurrealDB, CPython, and npm/uv dependencies)
+- GitHub CLI (`gh`), authenticated — only for `make release`
 
 ### Build
 
@@ -146,6 +149,22 @@ make app         # compile + bundle the .app
 
 All Rust/Tauri build artifacts (including the bundle) go to the top-level `build/`
 directory, set via `src-tauri/.cargo/config.toml`.
+
+### Cutting a release
+
+```bash
+make package    # build, then zip the .app -> build/dist/OpenNotebook-Desktop-<ver>-macos-<arch>.zip
+make release    # package, then publish a GitHub release tagged $(ON_VERSION) with that asset
+```
+
+`make release` is idempotent: it creates the release if the tag doesn't exist, or
+refreshes the notes and re-uploads the asset if it does. Release notes come from
+`packaging/release-notes.md` (placeholders filled in at publish time). It needs the
+GitHub CLI authenticated; if a stale `GH_TOKEN` shadows your login, override the CLI:
+
+```bash
+make release GH='env -u GH_TOKEN gh'
+```
 
 ### How the three payloads are produced
 

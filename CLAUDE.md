@@ -55,6 +55,12 @@ A **native desktop wrapper** for [open-notebook](https://github.com/lfnovo/open-
   prompt (which only links to GitHub) is misleading.
 - **Build orchestration via `Makefile`.** `make build` runs the whole pipeline
   (vendor → surreal → api → frontend → icons → app); `make run`/`clean` also exist.
+- **Releases via `make release`.** `make package` zips the `.app` (via `ditto`) to
+  `build/dist/`; `make release` builds + packages + publishes a GitHub release tagged
+  `$(ON_VERSION)` to `crueber/open-notebook-rui`, idempotently (create, else refresh
+  notes + re-upload). Notes come from `packaging/release-notes.md` (placeholders).
+  Distributed as a zipped `.app` (arm64); unsigned, so users clear quarantine / use
+  "Open Anyway". Override the CLI with `GH='env -u GH_TOKEN gh'` if a stale token shadows login.
 - **Build output is top-level `build/`** (cargo target-dir set in
   `src-tauri/.cargo/config.toml`), not `src-tauri/target/`.
 - **Build target:** `app` bundle (via `npx @tauri-apps/cli@2 build --bundles app`);
